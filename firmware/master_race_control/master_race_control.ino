@@ -1,27 +1,24 @@
 /*
  * CS-362 "Who is the Fastest?" — Master (race control + leaderboard)
- * I2C master. Slaves: 0x08 (lane 1), 0x09 (lane 2).
- * Uno/Nano: SDA=A4, SCL=A5. Install "LiquidCrystal I2C" by Frank de Brabander if using I2C LCD.
+ * Parallel LCD 16x2. I2C only for lane slaves: SDA=A4, SCL=A5.
  *
- * Master-only bench test: set MASTER_SOLO_TEST to 1. No Wire/I2C; fake lane times fire after GO.
+ * Bench test without slaves: MASTER_SOLO_TEST = 1 (fake lane data after GO).
  */
-#define MASTER_SOLO_TEST 0
+#define MASTER_SOLO_TEST 1
 
 #include <Wire.h>
-#include <LiquidCrystal_I2C.h>
+#include <LiquidCrystal.h>
 
 static const uint8_t SLAVE_LANE1 = 0x08;
 static const uint8_t SLAVE_LANE2 = 0x09;
 
-LiquidCrystal_I2C lcd(0x27, 16, 2);
+const int rs = 5, en = 6, d4 = 7, d5 = 8, d6 = 9, d7 = 10;
+LiquidCrystal lcd(rs, en, d4, d5, d6, d7);
 
-static const uint8_t PIN_START_BTN = 2;
-static const uint8_t PIN_LEADER_BTN = 3;
-static const uint8_t PIN_LED_COUNT_3 = 4;
-static const uint8_t PIN_LED_COUNT_2 = 5;
-static const uint8_t PIN_LED_COUNT_1 = 6;
-static const uint8_t PIN_LED_GO = 7;
-static const uint8_t PIN_BUZZER = 8;
+const int ledPins[3] = {2, 3, 4};
+const int button1 = 11;
+const int button2 = 12;
+const int buzzer = A0;
 
 struct LanePacket {
   uint8_t lane;
@@ -47,6 +44,12 @@ static uint8_t prevFin2 = 0;
 #if MASTER_SOLO_TEST
 static uint32_t soloRaceStartMs = 0;
 #endif
+
+static void allLedsOff() {
+  for (uint8_t i = 0; i < 3; i++) {
+    digitalWrite(ledPins[i], LOW);
+  }
+}
 
 static void lcdClearLine(uint8_t row) {
   lcd.setCursor(0, row);
@@ -118,29 +121,34 @@ static void sendRaceStartToSlaves(uint32_t t) {
 
 static void runCountdown() {
   prevFin1 = prevFin2 = 0;
-  digitalWrite(PIN_LED_COUNT_3, HIGH);
+  allLedsOff();
+
+  digitalWrite(ledPins[0], HIGH);
   delay(800);
-  digitalWrite(PIN_LED_COUNT_3, LOW);
-  digitalWrite(PIN_LED_COUNT_2, HIGH);
-  tone(PIN_BUZZER, 880, 120);
+  digitalWrite(ledPins[0], LOW);
+  digitalWrite(ledPins[1], HIGH);
+  tone(buzzer, 880, 120);
   delay(800);
-  digitalWrite(PIN_LED_COUNT_2, LOW);
-  digitalWrite(PIN_LED_COUNT_1, HIGH);
-  tone(PIN_BUZZER, 990, 120);
+  digitalWrite(ledPins[1], LOW);
+  digitalWrite(ledPins[2], HIGH);
+  tone(buzzer, 990, 120);
   delay(800);
-  digitalWrite(PIN_LED_COUNT_1, LOW);
-  digitalWrite(PIN_LED_GO, HIGH);
-  tone(PIN_BUZZER, 1320, 200);
+  digitalWrite(ledPins[2], LOW);
+
+  for (uint8_t i = 0; i < 3; i++) {
+    digitalWrite(ledPins[i], HIGH);
+  }
+  tone(buzzer, 1320, 200);
   uint32_t t = millis();
 #if MASTER_SOLO_TEST
   soloRaceStartMs = t;
-  Serial.println(F("solo: GO (fake lanes in ~2s / ~3.8s)"));
+  Serial.println(F("solo: GO (fake lanes ~2s / ~3.8s)"));
 #else
   sendRaceStartToSlaves(t);
 #endif
   raceActive = true;
   delay(400);
-  digitalWrite(PIN_LED_GO, LOW);
+  allLedsOff();
 }
 
 static void displayLeaderboard() {
@@ -162,39 +170,38 @@ static void displayLeaderboard() {
 void setup() {
   Serial.begin(9600);
 #if MASTER_SOLO_TEST
-  Serial.println(F("MASTER_SOLO_TEST=1: no I2C"));
+  Serial.println(F("MASTER_SOLO_TEST=1: no lane I2C"));
 #else
   Wire.begin();
 #endif
-  lcd.init();
-  lcd.backlight();
+  lcd.begin(16, 2);
   lcd.clear();
   lcd.print("Who is fastest?");
   lcd.setCursor(0, 1);
   lcd.print("Ready.");
 
-  pinMode(PIN_START_BTN, INPUT_PULLUP);
-  pinMode(PIN_LEADER_BTN, INPUT_PULLUP);
-  pinMode(PIN_LED_COUNT_3, OUTPUT);
-  pinMode(PIN_LED_COUNT_2, OUTPUT);
-  pinMode(PIN_LED_COUNT_1, OUTPUT);
-  pinMode(PIN_LED_GO, OUTPUT);
-  pinMode(PIN_BUZZER, OUTPUT);
+  pinMode(button1, INPUT_PULLUP);
+  pinMode(button2, INPUT_PULLUP);
+  pinMode(buzzer, OUTPUT);
+  for (uint8_t i = 0; i < 3; i++) {
+    pinMode(ledPins[i], OUTPUT);
+    digitalWrite(ledPins[i], LOW);
+  }
 }
 
 void loop() {
   static uint32_t lastPoll = 0;
   static uint32_t raceDeadline = 0;
 
-  if (digitalRead(PIN_START_BTN) == LOW) {
+  if (digitalRead(button1) == LOW) {
     delay(30);
-    while (digitalRead(PIN_START_BTN) == LOW) {}
+    while (digitalRead(button1) == LOW) {}
     runCountdown();
     raceDeadline = millis() + 60000UL;
   }
-  if (digitalRead(PIN_LEADER_BTN) == LOW) {
+  if (digitalRead(button2) == LOW) {
     delay(30);
-    while (digitalRead(PIN_LEADER_BTN) == LOW) {}
+    while (digitalRead(button2) == LOW) {}
     displayLeaderboard();
     delay(2500);
     lcd.clear();
