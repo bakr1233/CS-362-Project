@@ -2,7 +2,10 @@
  * CS-362 "Who is the Fastest?" — Master (race control + leaderboard)
  * I2C master. Slaves: 0x08 (lane 1), 0x09 (lane 2).
  * Uno/Nano: SDA=A4, SCL=A5. Install "LiquidCrystal I2C" by Frank de Brabander if using I2C LCD.
+ *
+ * Master-only bench test: set MASTER_SOLO_TEST to 1. No Wire/I2C; fake lane times fire after GO.
  */
+#define MASTER_SOLO_TEST 0
 
 #include <Wire.h>
 #include <LiquidCrystal_I2C.h>
@@ -41,6 +44,10 @@ static bool raceActive = false;
 static uint8_t prevFin1 = 0;
 static uint8_t prevFin2 = 0;
 
+#if MASTER_SOLO_TEST
+static uint32_t soloRaceStartMs = 0;
+#endif
+
 static void lcdClearLine(uint8_t row) {
   lcd.setCursor(0, row);
   lcd.print("                ");
@@ -70,6 +77,18 @@ static void addToLeaderboard(uint8_t lane, uint16_t speed) {
   }
 }
 
+static void announceLane(uint8_t lane, uint16_t speed_mm_s, uint16_t reaction_ms, uint8_t lcdRow) {
+  addToLeaderboard(lane, speed_mm_s);
+  lcdClearLine(lcdRow);
+  lcd.setCursor(0, lcdRow);
+  lcd.print("L");
+  lcd.print(lane);
+  lcd.print(" ");
+  lcd.print(speed_mm_s);
+  lcd.print("mm/s R");
+  lcd.print(reaction_ms);
+}
+
 static bool readLanePacket(uint8_t addr, LanePacket* out) {
   Wire.requestFrom(addr, PACKET_BYTES);
   if (Wire.available() < (int)PACKET_BYTES) return false;
@@ -80,6 +99,7 @@ static bool readLanePacket(uint8_t addr, LanePacket* out) {
   return true;
 }
 
+#if !MASTER_SOLO_TEST
 static void sendRaceStartToSlaves(uint32_t t) {
   uint8_t buf[5];
   buf[0] = 'S';
@@ -94,6 +114,7 @@ static void sendRaceStartToSlaves(uint32_t t) {
   for (uint8_t i = 0; i < 5; i++) Wire.write(buf[i]);
   Wire.endTransmission();
 }
+#endif
 
 static void runCountdown() {
   prevFin1 = prevFin2 = 0;
@@ -111,7 +132,12 @@ static void runCountdown() {
   digitalWrite(PIN_LED_GO, HIGH);
   tone(PIN_BUZZER, 1320, 200);
   uint32_t t = millis();
+#if MASTER_SOLO_TEST
+  soloRaceStartMs = t;
+  Serial.println(F("solo: GO (fake lanes in ~2s / ~3.8s)"));
+#else
   sendRaceStartToSlaves(t);
+#endif
   raceActive = true;
   delay(400);
   digitalWrite(PIN_LED_GO, LOW);
@@ -135,7 +161,11 @@ static void displayLeaderboard() {
 
 void setup() {
   Serial.begin(9600);
+#if MASTER_SOLO_TEST
+  Serial.println(F("MASTER_SOLO_TEST=1: no I2C"));
+#else
   Wire.begin();
+#endif
   lcd.init();
   lcd.backlight();
   lcd.clear();
@@ -175,35 +205,33 @@ void loop() {
 
   if (raceActive && millis() - lastPoll > 40) {
     lastPoll = millis();
+#if MASTER_SOLO_TEST
+    uint32_t dt = millis() - soloRaceStartMs;
+    if (!prevFin1 && dt >= 2000UL) {
+      announceLane(1, 500, 120, 0);
+      prevFin1 = 1;
+      Serial.println(F("solo: fake lane 1"));
+    }
+    if (!prevFin2 && dt >= 3800UL) {
+      announceLane(2, 450, 200, 1);
+      prevFin2 = 1;
+      Serial.println(F("solo: fake lane 2"));
+    }
+#else
     LanePacket p1, p2;
     if (readLanePacket(SLAVE_LANE1, &p1)) {
       if (p1.finished && !prevFin1 && p1.speed_mm_s > 0) {
-        addToLeaderboard(p1.lane, p1.speed_mm_s);
-        lcdClearLine(0);
-        lcd.setCursor(0, 0);
-        lcd.print("L");
-        lcd.print(p1.lane);
-        lcd.print(" ");
-        lcd.print(p1.speed_mm_s);
-        lcd.print("mm/s R");
-        lcd.print(p1.reaction_ms);
+        announceLane(p1.lane, p1.speed_mm_s, p1.reaction_ms, 0);
       }
       prevFin1 = p1.finished;
     }
     if (readLanePacket(SLAVE_LANE2, &p2)) {
       if (p2.finished && !prevFin2 && p2.speed_mm_s > 0) {
-        addToLeaderboard(p2.lane, p2.speed_mm_s);
-        lcdClearLine(1);
-        lcd.setCursor(0, 1);
-        lcd.print("L");
-        lcd.print(p2.lane);
-        lcd.print(" ");
-        lcd.print(p2.speed_mm_s);
-        lcd.print(" R");
-        lcd.print(p2.reaction_ms);
+        announceLane(p2.lane, p2.speed_mm_s, p2.reaction_ms, 1);
       }
       prevFin2 = p2.finished;
     }
+#endif
     if (prevFin1 && prevFin2) raceActive = false;
     if (raceActive && raceDeadline != 0 && millis() > raceDeadline) raceActive = false;
   }
