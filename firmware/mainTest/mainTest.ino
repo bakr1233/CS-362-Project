@@ -62,7 +62,7 @@ static void countdown() {
   allLedsOff();
 }
 
-static void sendRaceStart(uint32_t t0) {
+static bool sendRaceStart(uint32_t t0) {
   Wire.beginTransmission(SLAVE_ADDR);
   Wire.write((uint8_t)'s');
   Wire.write((uint8_t)(t0 & 0xFF));
@@ -75,7 +75,14 @@ static void sendRaceStart(uint32_t t0) {
     lcd.print("I2C tx err ");
     lcd.print(err);
     delay(2000);
+    return false;
   }
+  return true;
+}
+
+static bool i2cProbe(uint8_t addr) {
+  Wire.beginTransmission(addr);
+  return Wire.endTransmission() == 0;
 }
 
 static bool readSlavePacket(uint8_t* statusOut, uint32_t* reactOut, uint32_t* lapOut, uint32_t* spdOut) {
@@ -107,14 +114,25 @@ static void getDataBlocking() {
   uint32_t t0 = millis();
   reaction_ms = lap_ms = speed_mm_s = 0;
   lcd.clear();
-  lcd.print("Waiting slave..");
+  lcd.print("Race running...");
 
   while (millis() - t0 < 120000UL) {
     delay(40);
     uint8_t st = 0;
     uint32_t r = 0, l = 0, s = 0;
-    if (!readSlavePacket(&st, &r, &l, &s)) continue;
-    if (st == 3) {
+    if (!readSlavePacket(&st, &r, &l, &s)) {
+      lcd.setCursor(0, 1);
+      lcd.print("no I2C reply    ");
+      continue;
+    }
+    lcd.setCursor(0, 1);
+    if (st == 0) {
+      lcd.print("slv idle I2C?   ");
+    } else if (st == 1) {
+      lcd.print("brk START lane  ");
+    } else if (st == 2) {
+      lcd.print("brk FINISH lane ");
+    } else if (st == 3) {
       reaction_ms = r;
       lap_ms = l;
       speed_mm_s = s;
@@ -143,7 +161,7 @@ void race() {
   countdown();
 
   uint32_t signalTime = millis();
-  sendRaceStart(signalTime);
+  if (!sendRaceStart(signalTime)) return;
 
   getDataBlocking();
   showResults();
@@ -198,7 +216,16 @@ void setup() {
   lcd.clear();
   lcd.print("mainTest master");
   lcd.setCursor(0, 1);
-  lcd.print("btn11=race 12=LB");
+  if (i2cProbe(SLAVE_ADDR)) {
+    lcd.print("lane1 0x08 OK  ");
+  } else {
+    lcd.print("NO 0x08 GND A4A5");
+  }
+  delay(2000);
+  lcd.clear();
+  lcd.print("D11=race D12=LB");
+  lcd.setCursor(0, 1);
+  lcd.print("I2C to lane brd ");
 }
 
 void loop() {

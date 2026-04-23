@@ -1,19 +1,10 @@
 /*
  * Lane 1 slave — IR start/finish + parallel LCD + I2C (0x08).
- * Replaces old sensor.ino + fixes: correct 's'+time parse, always 14-byte reply, non-blocking race.
  *
- * Pins:
- *   LCD RS,EN,D4-D7 = 4,5,6,7,8,9
- *   Start IR = D2, Finish IR = D12 (beam BROKEN = LOW with INPUT_PULLUP + typical modules)
- *   I2C: SDA=A4, SCL=A5
+ * IMPORTANT: master millis() and slave millis() are NOT the same clock.
+ * All lap/reaction math uses t_race_start_slave = millis() on this board when GO is received.
  *
- * Master -> slave: 5 bytes = 's' + uint32_t t0_ms (LE, millis() at GO from master).
- * Slave -> master: 14 bytes on every request:
- *   [0] status: 0 idle, 1 armed, 2 running to finish, 3 done
- *   [1..4]   reaction_ms uint32 LE
- *   [5..8]   lap_ms uint32 LE   (finish_time - t0_ms)
- *   [9..12]  speed_mm_s uint32 LE  (DIST_MM * 1000 / lap_ms)
- *   [13]     reserved 0
+ * Pins: LCD 4-9, start D2, finish D12 (beam broken = LOW + INPUT_PULLUP), I2C A4/A5.
  */
 
 #include <Wire.h>
@@ -37,11 +28,15 @@ enum : uint8_t {
 };
 
 static volatile uint8_t state = ST_IDLE;
-static volatile uint32_t t0_ms = 0;
+static volatile uint32_t t_race_start_slave = 0;
+static volatile uint32_t t_master_echo = 0;
+static volatile uint8_t pendingArmLcd = 0;
 
 static uint32_t reaction_ms = 0;
 static uint32_t lap_ms = 0;
 static uint32_t speed_mm_s = 0;
+
+static uint32_t enteredFinishWaitMs = 0;
 
 static uint8_t txPacket[14];
 
@@ -71,12 +66,16 @@ static void onReceive(int numBytes) {
   t |= (uint32_t)Wire.read() << 16;
   t |= (uint32_t)Wire.read() << 24;
 
-  t0_ms = t;
+  t_master_echo = t;
+  t_race_start_slave = millis();
+  enteredFinishWaitMs = 0;
+
   reaction_ms = 0;
   lap_ms = 0;
   speed_mm_s = 0;
   state = ST_ARMED;
   buildTxPacket();
+  pendingArmLcd = 1;
 }
 
 static void onRequest() {
@@ -105,15 +104,23 @@ void setup() {
   Wire.onRequest(onRequest);
 
   lcd.clear();
-  lcd.print("Lane1 I2C 0x08");
+  lcd.print("Lane1 addr 0x08");
   lcd.setCursor(0, 1);
-  lcd.print("wait master...");
+  lcd.print("press RACE mstr ");
   buildTxPacket();
 }
 
 void loop() {
   static uint32_t lastUi = 0;
   static uint32_t armedAt = 0;
+
+  if (pendingArmLcd) {
+    pendingArmLcd = 0;
+    lcd.clear();
+    lcd.print("GO: brk START");
+    lcd.setCursor(0, 1);
+    lcd.print("D2 LOW=break    ");
+  }
 
   if (state == ST_ARMED) {
     if (armedAt == 0) armedAt = millis();
@@ -124,22 +131,27 @@ void loop() {
       lcd.print("timeout idle");
     } else if (digitalRead(startIR) == LOW) {
       uint32_t t_start = millis();
-      reaction_ms = (t_start >= t0_ms) ? (t_start - t0_ms) : 0;
+      reaction_ms = (t_start >= t_race_start_slave) ? (t_start - t_race_start_slave) : 0;
       state = ST_TO_FINISH;
       armedAt = 0;
+      enteredFinishWaitMs = millis();
       lcd.clear();
-      lcd.print("Break finish...");
+      lcd.print("brk FINISH D12");
+      lcd.setCursor(0, 1);
+      lcd.print("LOW=break       ");
     }
   } else if (state == ST_TO_FINISH) {
     if (digitalRead(finishIR) == LOW) {
       uint32_t t_fin = millis();
-      lap_ms = (t_fin > t0_ms) ? (t_fin - t0_ms) : 1;
+      lap_ms = (t_fin > t_race_start_slave) ? (t_fin - t_race_start_slave) : 1;
       if (lap_ms == 0) lap_ms = 1;
       speed_mm_s = (DIST_MM * 1000UL) / lap_ms;
       state = ST_DONE;
+      enteredFinishWaitMs = 0;
       showDoneLcd();
-    } else if (millis() - t0_ms > 120000UL) {
+    } else if (enteredFinishWaitMs != 0 && (millis() - enteredFinishWaitMs > 120000UL)) {
       state = ST_IDLE;
+      enteredFinishWaitMs = 0;
       lcd.clear();
       lcd.print("timeout idle");
     }
@@ -155,9 +167,9 @@ void loop() {
     lcd.setCursor(0, 0);
     lcd.print("Break START IR");
     lcd.setCursor(0, 1);
-    lcd.print("t0=");
-    lcd.print(t0_ms % 100000);
-    lcd.print("     ");
+    lcd.print("t0m=");
+    lcd.print(t_master_echo % 100000);
+    lcd.print("    ");
   }
 
   delay(2);
