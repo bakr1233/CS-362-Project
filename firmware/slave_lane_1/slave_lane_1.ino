@@ -85,13 +85,13 @@ static void onRequest() {
 
 static void showDoneLcd() {
   lcd.setCursor(0, 0);
-  lcd.print("Lap:");
-  lcd.print(lap_ms);
-  lcd.print("ms    ");
-  lcd.setCursor(0, 1);
-  lcd.print("V:");
+  lcd.print("Spd ");
   lcd.print(speed_mm_s);
-  lcd.print("mm/s ");
+  lcd.print(" mm/s");
+  lcd.setCursor(0, 1);
+  lcd.print("Lap ");
+  lcd.print(lap_ms);
+  lcd.print(" ms");
 }
 
 void setup() {
@@ -104,9 +104,10 @@ void setup() {
   Wire.onRequest(onRequest);
 
   lcd.clear();
-  lcd.print("Lane1 addr 0x08");
+  lcd.setCursor(0, 0);
+  lcd.print("Lane1 I2C 0x08 ");
   lcd.setCursor(0, 1);
-  lcd.print("press RACE mstr ");
+  lcd.print("Spd 0 Lap 0 ms  ");
   buildTxPacket();
 }
 
@@ -117,9 +118,10 @@ void loop() {
   if (pendingArmLcd) {
     pendingArmLcd = 0;
     lcd.clear();
-    lcd.print("GO: brk START");
+    lcd.setCursor(0, 0);
+    lcd.print("Start line D2  ");
     lcd.setCursor(0, 1);
-    lcd.print("D2 LOW=break    ");
+    lcd.print("Spd 0 Lap 0    ");
   }
 
   if (state == ST_ARMED) {
@@ -127,8 +129,13 @@ void loop() {
     if (millis() - armedAt > 120000UL) {
       state = ST_IDLE;
       armedAt = 0;
+      reaction_ms = lap_ms = speed_mm_s = 0;
+      buildTxPacket();
       lcd.clear();
-      lcd.print("timeout idle");
+      lcd.setCursor(0, 0);
+      lcd.print("Timed out      ");
+      lcd.setCursor(0, 1);
+      lcd.print("Spd 0 Lap 0 ms ");
     } else if (digitalRead(startIR) == LOW) {
       uint32_t t_start = millis();
       reaction_ms = (t_start >= t_race_start_slave) ? (t_start - t_race_start_slave) : 0;
@@ -136,9 +143,10 @@ void loop() {
       armedAt = 0;
       enteredFinishWaitMs = millis();
       lcd.clear();
-      lcd.print("brk FINISH D12");
+      lcd.setCursor(0, 0);
+      lcd.print("Finish line D12");
       lcd.setCursor(0, 1);
-      lcd.print("LOW=break       ");
+      lcd.print("Spd 0 til done  ");
     }
   } else if (state == ST_TO_FINISH) {
     if (digitalRead(finishIR) == LOW) {
@@ -152,8 +160,13 @@ void loop() {
     } else if (enteredFinishWaitMs != 0 && (millis() - enteredFinishWaitMs > 120000UL)) {
       state = ST_IDLE;
       enteredFinishWaitMs = 0;
+      reaction_ms = lap_ms = speed_mm_s = 0;
+      buildTxPacket();
       lcd.clear();
-      lcd.print("timeout idle");
+      lcd.setCursor(0, 0);
+      lcd.print("Timed out      ");
+      lcd.setCursor(0, 1);
+      lcd.print("Spd 0 Lap 0 ms ");
     }
   }
 
@@ -165,11 +178,9 @@ void loop() {
   if (state == ST_ARMED && millis() - lastUi > 250) {
     lastUi = millis();
     lcd.setCursor(0, 0);
-    lcd.print("Break START IR");
+    lcd.print("Start line D2  ");
     lcd.setCursor(0, 1);
-    lcd.print("t0m=");
-    lcd.print(t_master_echo % 100000);
-    lcd.print("    ");
+    lcd.print("Spd 0 Lap 0    ");
   }
 
   delay(2);
