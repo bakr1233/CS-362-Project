@@ -73,10 +73,16 @@ void setup() {
 }
 
 void loop() {
+  static uint32_t lastMs = 0;
+  uint32_t now = millis();
   if (!armed) {
-    delay(20);
+    if ((uint32_t)(now - lastMs) < 20U) return;
+    lastMs = now;
     return;
   }
+
+  if ((uint32_t)(now - lastMs) < 5U) return;
+  lastMs = now;
 
   uint32_t dStart = readDistanceCm(PIN_TRIG_START, PIN_ECHO_START);
   if (reactionMs == 0 && dStart < DIST_THRESHOLD_CM) {
@@ -94,5 +100,4 @@ void loop() {
       digitalWrite(PIN_STATUS_LED, HIGH);
     }
   }
-  delay(5);
 }
