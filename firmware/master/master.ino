@@ -1,6 +1,6 @@
 /*
  * CS-362 — Master, lane 1 only (I2C 0x08).
- * LCD 5,6,7–10 | LEDs 2,3,4 | buzzer A0 | D11 race | D12 last run
+ * LCD 5,6,7–10 | LEDs 2,3,4 | piezo + on A0 (tone) | D11 race | D12 last run
  */
 
 #include <Wire.h>
@@ -66,6 +66,7 @@ static void allLedsOff() {
 }
 
 static void countdown() {
+  noTone(buzzer);
   allLedsOff();
   digitalWrite(led1, HIGH);
   delay(800);
@@ -83,7 +84,20 @@ static void countdown() {
   digitalWrite(led3, HIGH);
   tone(buzzer, 1320, 200);
   delay(450);
+  noTone(buzzer);
   allLedsOff();
+}
+
+static void beepOk() {
+  tone(buzzer, 1568, 90);
+  delay(100);
+  noTone(buzzer);
+}
+
+static void beepBad() {
+  tone(buzzer, 220, 200);
+  delay(220);
+  noTone(buzzer);
 }
 
 static bool i2cPing(uint8_t a) {
@@ -149,12 +163,14 @@ static void waitLane1() {
       reaction_ms = r;
       lap_ms = l;
       speed_mm_s = s;
+      beepOk();
       drawLastRun();
       return;
     }
     lcdRow0("Race on        ");
   }
   zeros();
+  beepBad();
   lcd.clear();
   lcdRow0("No finish      ");
   lcdRow1("Spd 0 Lap 0    ");
@@ -167,6 +183,7 @@ static void runRace() {
   uint32_t go = millis();
   if (!sendGo(go)) {
     zeros();
+    beepBad();
     lcd.clear();
     lcdRow0("Lane1 offline  ");
     lcdRow1("Spd 0 Lap 0    ");
@@ -224,6 +241,7 @@ void setup() {
   pinMode(led2, OUTPUT);
   pinMode(led3, OUTPUT);
   pinMode(buzzer, OUTPUT);
+  noTone(buzzer);
   allLedsOff();
 
   lcd.clear();
