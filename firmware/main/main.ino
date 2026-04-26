@@ -262,6 +262,9 @@ void winner(){
       lastTime = millis();
     }
   }
+
+  updateLeaderboard(speed1);
+  updateLeaderboard(speed2);
 }
 
 void countdown(){
@@ -316,43 +319,46 @@ void ledsOff(){
   digitalWrite(green, LOW);
 }
 
-void updateLeaderboard(long newTime){
-  if(newTime == 0){
-    return;
-  }
+void updateLeaderboard(long newSpeed) {
+  if (newSpeed <= 0) return; // Ignore zero or negative
 
-  Leaderboard leaderboard[boardSize];
+  Leaderboard leaderboard[boardSize]; // Ensure boardSize is defined globally
 
+  // 1. Read from EEPROM
   for (int i = 0; i < boardSize; i++) {
-    EEPROM.get(EEPROM_START_ADDR + (i * sizeof(Leaderboard)), leadBoard[i]);
-    if (leadBoard[i].speed == 0xFFFFFFFF){
-      leadBoard[i].speed = 0;
+    EEPROM.get(EEPROM_START_ADDR + (i * sizeof(Leaderboard)), leaderboard[i]);
+    if (leaderboard[i].speed == 0xFFFFFFFF) {
+      leaderboard[i].speed = 0;
     }
   }
 
-  for (int i = 0; i < MAX_RECORDS; i++) {
-    if (newSpeed > leadBoard[i].speed) {
+  // 2. Find the spot and shift
+  for (int i = 0; i < boardSize; i++) {
+    if (newSpeed > leaderboard[i].speed) {
       
-      for (int j = MAX_RECORDS - 1; j > i; j--) {
-        leadBoard[j] = leadBoard[j - 1];
+      // Shift lower ranks down
+      for (int j = boardSize - 1; j > i; j--) {
+        leaderboard[j] = leaderboard[j - 1];
       }
       
-      leadBoard[i].speed = newSpeed;
+      // Insert new record
+      leaderboard[i].speed = newSpeed;
       
-      for (int k = 0; k < MAX_RECORDS; k++) {
-        EEPROM.put(EEPROM_START_ADDR + (k * sizeof(Record)), leadBoard[k]);
+      // 3. Save the updated board back to EEPROM
+      for (int k = 0; k < boardSize; k++) {
+        // Corrected variable name to 'leaderboard'
+        EEPROM.put(EEPROM_START_ADDR + (k * sizeof(Leaderboard)), leaderboard[k]);
       }
-      break; 
+      break; // Exit once the update is done
     }
   }
-  
 }
 
 void leaderboard(){
   lcd.clear();
   lcd.print("--Leaderboard-- ");
 
-  unsigned long waitLastTime = 0;
+  unsigned long waitLastTime = millis();
   bool waitDone = false;
 
   while(!waitDone){
@@ -365,7 +371,7 @@ void leaderboard(){
 
   for(int i = 0; i < boardSize; i++){
     Leaderboard x;
-    EEPROM.get(EEPROM_START_ADDR + (i * sizeof(Record)), x);
+    EEPROM.get(EEPROM_START_ADDR + (i * sizeof(Leaderboard)), x);
 
     lcd.clear();
     lcd.setCursor(0, 0);
@@ -374,15 +380,21 @@ void leaderboard(){
 
     lcd.setCursor(0, 1);
     // If the speed is 0 or factory default
-    if (r.speed == 0 || r.speed == 0xFFFFFFFF) {
+    if (x.speed == 0 || x.speed == 0xFFFFFFFF) {
       lcd.print("---");
     } 
     else {
-      lcd.print(r.speed);
-      lcd.print(" units/sec"); //must change 
+      lcd.print(x.speed / 100);
+      lcd.print(".");
+      int decimals = x.speed % 100;
+      if (decimals < 10){
+        lcd.print("0");
+      } 
+      lcd.print(decimals);
+      lcd.print(" MPH    ");
     }
 
-    unsigned long delayLastTime = 0;
+    unsigned long delayLastTime = millis();
     bool delayDone = false;
 
     while(!delayDone){
@@ -392,8 +404,7 @@ void leaderboard(){
       }
     }
   }
-
-  }
+  
   lcd.clear();
   lcd.print("Racing time!!   ");
 
@@ -419,6 +430,6 @@ void setup(){
 
 void loop(){
   button1Check();
-  // button2Check();
+  button2Check();
 
 }
