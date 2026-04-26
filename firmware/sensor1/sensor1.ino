@@ -2,10 +2,15 @@
 
 #include <Wire.h>
 #include <LiquidCrystal.h>
+#include <TM1637Display.h>
 
 //Pins for LCD
 const int rs = 4, en = 5, d4 = 6, d5 = 7, d6 = 8, d7 = 9;
 LiquidCrystal lcd(rs, en, d4, d5, d6, d7);
+
+int CLK = A0;
+int DIO = A1;
+TM1637Display display(CLK, DIO);
 
 bool raceSignal = false; //Signal to start up the race
 bool dataReady = false;
@@ -80,8 +85,15 @@ void printData(){
   lcd.setCursor(0, 0);
   lcd.print("S: ");
   lcd.print(speed / 100);
-  lcd.print(" MPH    ")
+  lcd.print(".");
+  int decimals = speed % 100;
+  if (decimals < 10){
+    lcd.print("0");
+  } 
+  lcd.print(decimals);
+  lcd.print(" MPH    ");
   
+  //If the clock works fine then comment this part out
   lcd.setCursor(0, 1);
   lcd.print("T: ");
   lcd.print(objectTime / 1000);
@@ -90,7 +102,19 @@ void printData(){
   lcd.println(" seconds   ");
 
 
-  //Put the time the car finished in the clock
+  // lcd.setCursor(0, 1);
+  // lcd.print("R: ");
+  // lcd.print(reactionTime / 1000);
+  // lcd.print(".");
+  // lcd.print(reactionTime % 1000);
+  // lcd.println(" seconds   ");
+
+  int totalSeconds = objectTime / 1000;
+  int centiSeconds = (objectTime % 1000) / 10;
+
+  int displayValue = (totalSeconds * 100) + centiSeconds;
+
+  display.showNumberDecEx(displayValue, 0x40, true);
 }
 
 void setup() {
@@ -103,8 +127,11 @@ void setup() {
   Wire.onReceive(getSignal);
   Wire.onRequest(sendData);
 
+  display.setBrightness(0x0f);
+  display.clear();             
+
   lcd.setCursor(0, 0);
-  lcd.print("Lane 1 is ready ")
+  lcd.print("Lane 1 is ready ");
 }
 
 void loop() {
